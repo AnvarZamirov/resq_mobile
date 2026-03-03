@@ -65,40 +65,53 @@ class _SOSButtonState extends State<SOSButton>
       _progress = 0.0;
       _isPressed = false;
     });
+    // Возобновляем пульсацию если она остановлена
+    if (!_pulseController.isAnimating && _pulseController.status != AnimationStatus.forward) {
+      _pulseController.repeat(reverse: true);
+    }
   }
 
   void _activateSOS() {
     HapticFeedback.heavyImpact();
     _progressTimer?.cancel();
+    _pulseController.stop(); // Останавливаем пульсацию при активации
+    setState(() {
+      _isPressed = false;
+      _progress = 1.0; // Устанавливаем прогресс на 100%
+    });
     widget.onSOSActivated?.call();
   }
+  
 
-  void _onPanStart(DragStartDetails details) {
+  void _onTapDown(TapDownDetails details) {
     HapticFeedback.lightImpact();
     setState(() {
       _isPressed = true;
     });
+    _pulseController.stop(); // Останавливаем пульсацию при нажатии
     _startProgress();
   }
 
-  void _onPanEnd(DragEndDetails details) {
+  void _onTapUp(TapUpDetails details) {
     if (_progress < 1.0) {
       HapticFeedback.mediumImpact();
       _stopProgress();
+      _pulseController.repeat(reverse: true); // Возобновляем пульсацию
       widget.onCancel?.call();
     }
   }
 
-  void _onPanCancel() {
+  void _onTapCancel() {
     _stopProgress();
+    _pulseController.repeat(reverse: true); // Возобновляем пульсацию
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onPanStart: _onPanStart,
-      onPanEnd: _onPanEnd,
-      onPanCancel: _onPanCancel,
+      onTapDown: _onTapDown,
+      onTapUp: _onTapUp,
+      onTapCancel: _onTapCancel,
       child: AnimatedBuilder(
         animation: _pulseAnimation,
         builder: (context, child) {

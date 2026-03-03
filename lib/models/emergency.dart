@@ -63,6 +63,60 @@ class Emergency {
       longitude: longitude ?? this.longitude,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'activatedAt': activatedAt.toIso8601String(),
+      'resolvedAt': resolvedAt?.toIso8601String(),
+      'mode': mode.toString().split('.').last,
+      'status': status.toString().split('.').last,
+      'responseTimeSeconds': responseTime?.inSeconds,
+      'contactsReached': contactsReached,
+      'totalContacts': totalContacts,
+      'audioDurationSeconds': audioDurationSeconds,
+      'locationAccuracy': locationAccuracy,
+      'locationAddress': locationAddress,
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+  }
+
+  factory Emergency.fromJson(Map<String, dynamic> json) {
+    EmergencyMode parseMode(String? v) {
+      return EmergencyMode.values.firstWhere(
+        (e) => e.toString().split('.').last == v,
+        orElse: () => EmergencyMode.standard,
+      );
+    }
+
+    EmergencyStatus parseStatus(String? v) {
+      return EmergencyStatus.values.firstWhere(
+        (e) => e.toString().split('.').last == v,
+        orElse: () => EmergencyStatus.active,
+      );
+    }
+
+    return Emergency(
+      id: json['id'] as String,
+      activatedAt: DateTime.parse(json['activatedAt'] as String),
+      resolvedAt: json['resolvedAt'] != null
+          ? DateTime.parse(json['resolvedAt'] as String)
+          : null,
+      mode: parseMode(json['mode'] as String?),
+      status: parseStatus(json['status'] as String?),
+      responseTime: json['responseTimeSeconds'] != null
+          ? Duration(seconds: (json['responseTimeSeconds'] as num).toInt())
+          : null,
+      contactsReached: (json['contactsReached'] as num?)?.toInt() ?? 0,
+      totalContacts: (json['totalContacts'] as num?)?.toInt() ?? 0,
+      audioDurationSeconds: (json['audioDurationSeconds'] as num?)?.toInt(),
+      locationAccuracy: (json['locationAccuracy'] as num?)?.toDouble(),
+      locationAddress: json['locationAddress'] as String?,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+    );
+  }
 }
 
 enum EmergencyMode {

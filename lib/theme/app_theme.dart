@@ -87,7 +87,6 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        color: surfaceLight,
       ),
     );
   }
@@ -159,7 +158,6 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        color: surfaceDark,
       ),
     );
   }

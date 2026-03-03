@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/device.dart';
+import '../services/device_repository.dart';
+import '../services/timeline_repository.dart';
+import '../models/checkin.dart';
 
 class DeviceDashboardScreen extends StatefulWidget {
   const DeviceDashboardScreen({super.key});
@@ -20,6 +23,30 @@ class _DeviceDashboardScreenState extends State<DeviceDashboardScreen> {
     gpsSatellites: 5,
     lastLocationUpdate: DateTime.now().subtract(const Duration(minutes: 2)),
   );
+
+  final DeviceRepository _repo = DeviceRepository();
+  DeviceSettings _settings = DeviceSettings(batterySaverMode: false, lastTested: null);
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final s = await _repo.load();
+    if (!mounted) return;
+    setState(() {
+      _settings = s;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save(DeviceSettings s) async {
+    setState(() => _settings = s);
+    await _repo.save(s);
+  }
 
   String _formatDateTime(DateTime? dateTime) {
     if (dateTime == null) return 'Никогда';
@@ -42,7 +69,9 @@ class _DeviceDashboardScreenState extends State<DeviceDashboardScreen> {
       appBar: AppBar(
         title: const Text('Устройство ResQ'),
       ),
-      body: ListView(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
         padding: const EdgeInsets.all(16),
         children: [
           // Device Card
@@ -127,7 +156,7 @@ class _DeviceDashboardScreenState extends State<DeviceDashboardScreen> {
                       Expanded(
                         child: _buildStatItem(
                           'Последний тест',
-                          _formatDateTime(_device.lastTested),
+                          _formatDateTime(_settings.lastTested ?? _device.lastTested),
                           Icons.check_circle_outline,
                         ),
                       ),
@@ -148,9 +177,7 @@ class _DeviceDashboardScreenState extends State<DeviceDashboardScreen> {
             icon: Icons.notifications_active,
             label: 'Тестовый сигнал (тихий)',
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Тестовый сигнал отправлен')),
-              );
+              _handleTestAlert();
             },
           ),
           const SizedBox(height: 8),
@@ -166,7 +193,7 @@ class _DeviceDashboardScreenState extends State<DeviceDashboardScreen> {
             icon: Icons.battery_saver,
             label: 'Режим экономии батареи',
             onTap: () {
-              // TODO: Toggle battery saver
+              _toggleBatterySaver();
             },
           ),
           const SizedBox(height: 8),
@@ -310,6 +337,41 @@ class _DeviceDashboardScreenState extends State<DeviceDashboardScreen> {
               size: 20,
             ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _handleTestAlert() async {
+    final now = DateTime.now();
+    await _save(_settings.copyWith(lastTested: now));
+
+    // Запишем событие в журнал (как check-in/тест)
+    await TimelineRepository().addCheckIn(
+      CheckIn(
+        id: now.millisecondsSinceEpoch.toString(),
+        timestamp: now,
+        message: 'Тест устройства (тихий)',
+        durationMinutes: 1,
+        status: CheckInStatus.completed,
+        endedAt: now,
+        notifiedContactIds: const [],
+      ),
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Тестовый сигнал выполнен и записан в журнал')),
+    );
+  }
+
+  Future<void> _toggleBatterySaver() async {
+    await _save(_settings.copyWith(batterySaverMode: !_settings.batterySaverMode));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _settings.batterySaverMode ? 'Battery Saver: Включен' : 'Battery Saver: Выключен',
+        ),
       ),
     );
   }

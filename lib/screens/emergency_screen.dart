@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/sos_button.dart';
@@ -5,6 +7,8 @@ import '../widgets/status_indicator.dart';
 import '../widgets/quick_action_chip.dart';
 import '../models/system_status.dart';
 import 'emergency_overlay_screen.dart';
+import '../services/system_status_service.dart';
+import '../services/emergency_service.dart';
 
 class EmergencyScreen extends StatefulWidget {
   const EmergencyScreen({super.key});
@@ -14,29 +18,53 @@ class EmergencyScreen extends StatefulWidget {
 }
 
 class _EmergencyScreenState extends State<EmergencyScreen> {
-  final SystemStatus _systemStatus = SystemStatus(
-    gpsActive: true,
-    microphoneReady: true,
-    networkConnected: true,
-    batteryLevel: 87,
-  );
+  final SystemStatusService _statusService = SystemStatusService();
+  SystemStatus _systemStatus = SystemStatus();
+  Timer? _statusTimer;
 
   bool _isEmergencyActive = false;
+  int _sosButtonKey = 0; // Используем для пересоздания кнопки
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshStatus();
+    _statusTimer = Timer.periodic(const Duration(seconds: 3), (_) => _refreshStatus());
+  }
+
+  @override
+  void dispose() {
+    _statusTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshStatus() async {
+    try {
+      final s = await _statusService.getStatus();
+      if (!mounted) return;
+      setState(() => _systemStatus = s);
+    } catch (_) {
+      // ignore
+    }
+  }
 
   void _handleSOSActivated() {
-    setState(() {
-      _isEmergencyActive = true;
-    });
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const EmergencyOverlayScreen(),
-        fullscreenDialog: true,
-      ),
-    ).then((_) {
+    if (!_isEmergencyActive) {
       setState(() {
-        _isEmergencyActive = false;
+        _isEmergencyActive = true;
       });
-    });
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => EmergencyOverlayScreen(service: EmergencyService()),
+          fullscreenDialog: true,
+        ),
+      ).then((_) {
+        setState(() {
+          _isEmergencyActive = false;
+          _sosButtonKey++; // Пересоздаем кнопку для сброса состояния
+        });
+      });
+    }
   }
 
   void _handleShareLocation() {
@@ -88,8 +116,11 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                     icon: Icons.wifi,
                   ),
                   StatusIndicator(
-                    label: 'Батарея: ${_systemStatus.batteryLevel}%',
-                    isActive: _systemStatus.batteryLevel > 20,
+                    label: _systemStatus.batteryLevel >= 0
+                        ? 'Батарея: ${_systemStatus.batteryLevel}%'
+                        : 'Батарея: —',
+                    isActive: _systemStatus.batteryLevel >= 0 &&
+                        _systemStatus.batteryLevel > 20,
                     icon: Icons.battery_charging_full,
                   ),
                 ],
@@ -102,6 +133,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     SOSButton(
+                      key: ValueKey(_sosButtonKey),
                       onSOSActivated: _handleSOSActivated,
                     ),
                     const SizedBox(height: 24),

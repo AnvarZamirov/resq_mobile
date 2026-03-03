@@ -51,6 +51,47 @@ class CheckIn {
       locationAddress: locationAddress ?? this.locationAddress,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'timestamp': timestamp.toIso8601String(),
+      'message': message,
+      'durationMinutes': durationMinutes,
+      'endedAt': endedAt?.toIso8601String(),
+      'status': status.toString().split('.').last,
+      'notifiedContactIds': notifiedContactIds,
+      'latitude': latitude,
+      'longitude': longitude,
+      'locationAddress': locationAddress,
+    };
+  }
+
+  factory CheckIn.fromJson(Map<String, dynamic> json) {
+    CheckInStatus parseStatus(String? v) {
+      return CheckInStatus.values.firstWhere(
+        (e) => e.toString().split('.').last == v,
+        orElse: () => CheckInStatus.completed,
+      );
+    }
+
+    return CheckIn(
+      id: json['id'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      message: json['message'] as String?,
+      durationMinutes: (json['durationMinutes'] as num?)?.toInt(),
+      endedAt:
+          json['endedAt'] != null ? DateTime.parse(json['endedAt'] as String) : null,
+      status: parseStatus(json['status'] as String?),
+      notifiedContactIds: (json['notifiedContactIds'] as List?)
+              ?.whereType<String>()
+              .toList() ??
+          const [],
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      locationAddress: json['locationAddress'] as String?,
+    );
+  }
 }
 
 enum CheckInStatus {

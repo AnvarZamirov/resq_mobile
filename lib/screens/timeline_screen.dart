@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/checkin.dart';
 import '../models/emergency.dart';
+import '../services/timeline_repository.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key});
@@ -13,36 +14,24 @@ class TimelineScreen extends StatefulWidget {
 class _TimelineScreenState extends State<TimelineScreen> {
   TimelineFilter _currentFilter = TimelineFilter.all;
 
-  final List<dynamic> _events = [
-    CheckIn(
-      id: '1',
-      timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-      message: 'Heading home',
-      durationMinutes: 30,
-      status: CheckInStatus.completed,
-      notifiedContactIds: ['1', '2'],
-    ),
-    CheckIn(
-      id: '2',
-      timestamp: DateTime.now().subtract(const Duration(days: 2, hours: 1)),
-      message: 'Date night check-in',
-      durationMinutes: 240,
-      status: CheckInStatus.completed,
-      endedAt: DateTime.now().subtract(const Duration(days: 2)),
-    ),
-    Emergency(
-      id: '3',
-      activatedAt: DateTime.now().subtract(const Duration(days: 3, hours: 3)),
-      resolvedAt: DateTime.now().subtract(const Duration(days: 3, hours: 2, minutes: 52)),
-      mode: EmergencyMode.standard,
-      status: EmergencyStatus.resolved,
-      responseTime: const Duration(minutes: 8),
-      contactsReached: 3,
-      totalContacts: 3,
-      audioDurationSeconds: 30,
-      locationAccuracy: 8.0,
-    ),
-  ];
+  final TimelineRepository _repo = TimelineRepository();
+  List<dynamic> _events = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final items = await _repo.load();
+    if (!mounted) return;
+    setState(() {
+      _events = items;
+      _loading = false;
+    });
+  }
 
   List<dynamic> get _filteredEvents {
     switch (_currentFilter) {
@@ -74,6 +63,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       appBar: AppBar(
         title: const Text('Журнал безопасности'),
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _addCheckIn,
+        backgroundColor: AppTheme.emergencyRed,
+        child: const Icon(Icons.add),
+      ),
       body: Column(
         children: [
           // Filter chips
@@ -91,7 +85,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
           ),
           // Timeline
           Expanded(
-            child: _filteredEvents.isEmpty
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _filteredEvents.isEmpty
                 ? _buildEmptyState()
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -110,6 +106,72 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _addCheckIn() async {
+    final controller = TextEditingController();
+    final durationController = TextEditingController(text: '30');
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Новый чек-ин'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Сообщение',
+                hintText: 'Например, “Иду домой”',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: durationController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Длительность (мин)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Создать'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) {
+      controller.dispose();
+      durationController.dispose();
+      return;
+    }
+
+    final msg = controller.text.trim().isEmpty ? 'Check-in' : controller.text.trim();
+    final dur = int.tryParse(durationController.text.trim()) ?? 30;
+
+    controller.dispose();
+    durationController.dispose();
+
+    final checkIn = CheckIn(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      timestamp: DateTime.now(),
+      message: msg,
+      durationMinutes: dur,
+      status: CheckInStatus.active,
+      notifiedContactIds: const [],
+    );
+
+    await _repo.addCheckIn(checkIn);
+    await _load();
   }
 
   Widget _buildFilterChip(String label, TimelineFilter filter) {

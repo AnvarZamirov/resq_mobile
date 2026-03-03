@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
+import '../services/contacts_repository.dart';
+import 'contact_form_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -10,28 +13,28 @@ class ContactsScreen extends StatefulWidget {
 }
 
 class _ContactsScreenState extends State<ContactsScreen> {
-  final List<Contact> _contacts = [
-    Contact(
-      id: '1',
-      name: 'Мама',
-      phone: '+996 555 123456',
-      email: 'mom@email.com',
-      role: ContactRole.primary,
-      lastAlerted: DateTime.now().subtract(const Duration(days: 2)),
-    ),
-    Contact(
-      id: '2',
-      name: 'Брат',
-      phone: '+996 777 789012',
-      role: ContactRole.secondary,
-    ),
-    Contact(
-      id: '3',
-      name: 'Местная полиция',
-      phone: '102',
-      role: ContactRole.autoAdded,
-    ),
-  ];
+  final ContactsRepository _repo = ContactsRepository();
+  List<Contact> _contacts = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final items = await _repo.load();
+    if (!mounted) return;
+    setState(() {
+      _contacts = items;
+      _loading = false;
+    });
+  }
+
+  Future<void> _persist() async {
+    await _repo.save(_contacts);
+  }
 
   String _getRoleLabel(ContactRole role) {
     switch (role) {
@@ -77,10 +80,95 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _handleAddContact() {
-    // TODO: Navigate to add contact screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Добавить контакт')),
+    _openCreate();
+  }
+
+  Future<void> _openCreate() async {
+    final created = await Navigator.of(context).push<Contact>(
+      MaterialPageRoute(builder: (_) => const ContactFormScreen()),
     );
+    if (created == null) return;
+    setState(() {
+      _contacts = [created, ..._contacts];
+    });
+    await _persist();
+  }
+
+  Future<void> _openEdit(Contact contact) async {
+    final edited = await Navigator.of(context).push<Contact>(
+      MaterialPageRoute(builder: (_) => ContactFormScreen(initial: contact)),
+    );
+    if (edited == null) return;
+    setState(() {
+      _contacts = _contacts.map((c) => c.id == edited.id ? edited : c).toList();
+    });
+    await _persist();
+  }
+
+  Future<void> _delete(Contact contact) async {
+    if (contact.role == ContactRole.autoAdded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Автоматический контакт нельзя удалить')),
+      );
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить контакт?'),
+        content: Text('Контакт "${contact.name}" будет удалён.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.statusError),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+    setState(() {
+      _contacts = _contacts.where((c) => c.id != contact.id).toList();
+    });
+    await _persist();
+  }
+
+  String _buildTestMessage(Contact contact) {
+    final now = DateTime.now();
+    final ts =
+        '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    return 'ResQ TEST: проверка контакта.\nКонтакт: ${contact.name}\nВремя: $ts';
+  }
+
+  Future<void> _testContact(Contact contact) async {
+    if (contact.phone.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('У контакта нет номера телефона')),
+      );
+      return;
+    }
+
+    final uri = Uri(
+      scheme: 'sms',
+      path: contact.phone.trim(),
+      queryParameters: <String, String>{
+        'body': _buildTestMessage(contact),
+      },
+    );
+
+    final ok = await launchUrl(uri);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть SMS приложение')),
+      );
+    }
   }
 
   @override
@@ -89,25 +177,27 @@ class _ContactsScreenState extends State<ContactsScreen> {
       appBar: AppBar(
         title: const Text('Моя сеть доверия'),
       ),
-      body: _contacts.isEmpty
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _contacts.isEmpty
           ? _buildEmptyState()
           : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // Add contact button
-                ElevatedButton.icon(
-                  onPressed: _handleAddContact,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Добавить контакт для экстренных случаев'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // Contacts list
-                ..._contacts.map((contact) => _buildContactCard(contact)),
-              ],
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Add contact button
+          ElevatedButton.icon(
+            onPressed: _handleAddContact,
+            icon: const Icon(Icons.add),
+            label: const Text('Добавить контакт для экстренных случаев'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
             ),
+          ),
+          const SizedBox(height: 24),
+          // Contacts list
+          ..._contacts.map((contact) => _buildContactCard(contact)),
+        ],
+      ),
     );
   }
 
@@ -148,7 +238,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   Widget _buildContactCard(Contact contact) {
-    return Card(
+    final canDelete = contact.role != ContactRole.autoAdded;
+
+    Widget card = Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -169,7 +261,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           ),
                           if (contact.role == ContactRole.primary) ...[
                             const SizedBox(width: 8),
-                            Icon(
+                            const Icon(
                               Icons.check_circle,
                               size: 20,
                               color: AppTheme.statusSuccess,
@@ -184,7 +276,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: _getRoleColor(contact.role).withOpacity(0.1),
+                          color: _getRoleColor(contact.role).withAlpha(25),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -204,7 +296,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             const SizedBox(height: 16),
             Row(
               children: [
-                Icon(Icons.phone, size: 18, color: AppTheme.textSecondary),
+                const Icon(Icons.phone, size: 18, color: AppTheme.textSecondary),
                 const SizedBox(width: 8),
                 Text(
                   contact.phone,
@@ -216,7 +308,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Icon(Icons.email, size: 18, color: AppTheme.textSecondary),
+                  const Icon(Icons.email, size: 18, color: AppTheme.textSecondary),
                   const SizedBox(width: 8),
                   Text(
                     contact.email!,
@@ -225,6 +317,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ],
               ),
             ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(
+                  contact.receivesSOS ? Icons.notifications_active : Icons.notifications_off,
+                  size: 18,
+                  color: contact.receivesSOS ? AppTheme.statusSuccess : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  contact.receivesSOS ? 'Получает SOS' : 'SOS отключён',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
             if (contact.lastAlerted != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -236,16 +343,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
             Row(
               children: [
                 TextButton.icon(
-                  onPressed: () {
-                    // TODO: Edit contact
-                  },
+                  onPressed: contact.role == ContactRole.autoAdded ? null : () => _openEdit(contact),
                   icon: const Icon(Icons.edit),
                   label: const Text('Редактировать'),
                 ),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: () {
-                    // TODO: Test contact
+                    _testContact(contact);
                   },
                   icon: const Icon(Icons.notifications_active),
                   label: const Text('Проверить'),
@@ -256,6 +361,25 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ),
       ),
     );
+
+    if (!canDelete) return card;
+    return Dismissible(
+      key: ValueKey('contact_${contact.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: AppTheme.statusError.withAlpha(30),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.delete, color: AppTheme.statusError),
+      ),
+      confirmDismiss: (_) async {
+        await _delete(contact);
+        return false; // deletion already handled
+      },
+      child: card,
+    );
   }
 }
-
